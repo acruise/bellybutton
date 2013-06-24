@@ -10,7 +10,7 @@ class LintPlugger(val global: Global) extends Plugin {
   import global._
 
   val name = "Belly Button"
-  val components = List(Component)
+  val components: List[PluginComponent] = List(Component)
   val description = "Loads Lint libraries from the classpath so they can flame on your code"
 
   private object Component extends PluginComponent {
@@ -21,7 +21,7 @@ class LintPlugger(val global: Global) extends Plugin {
     def newPhase(prev: Phase) = new LintyPhase(prev)
 
     class LintyPhase(prev: Phase) extends StdPhase(prev) {
-      val plugins: Seq[LintPlugin] = {
+      val plugins = {
         // TODO which classloader to use here?
         val cl = getClass.getClassLoader
 
@@ -34,7 +34,7 @@ class LintPlugger(val global: Global) extends Plugin {
         }
 
         val urls = cl.getResources("/META-INF/services/com.cluonflux.bellybutton.LintPlugin").asScala
-        for (url <- urls) {
+        for (url <- urls) yield {
           val (mSrc, classNames) = try {
             val is = url.openStream()
             val source = scala.io.Source.fromInputStream(is, "UTF-8")
@@ -47,12 +47,9 @@ class LintPlugger(val global: Global) extends Plugin {
               (None, Nil)
           }
 
-          mSrc match {
-            case None =>
-
-            case Some(src) =>
+          mSrc.toSeq.flatMap { src =>
               try {
-                for (classname <- classNames) yield {
+                classNames.flatMap { classname =>
                   try {
                     val clazz = cl.loadClass(classname).asInstanceOf[Class[LintPlugin]]
                     val plugin = clazz.newInstance()
@@ -60,6 +57,18 @@ class LintPlugger(val global: Global) extends Plugin {
                     val shorty = plugin.shortName
                     val enabledByDefault = plugin.enabledByDefault
 
+                    if (disabled contains shorty) {
+                      None
+                    } else if (enabled.contains(shorty) || enabledByDefault) {
+                      Some(plugin)
+                    } else {
+                      None
+                    }
+                  } catch {
+                    case e: Exception =>
+                      reporter.echo(s"Caught exception while attempting to instantiate plugin $classname: ${e.getMessage}")
+                      reportThrowable(e)
+                      None
                   }
                 }
               } finally {
